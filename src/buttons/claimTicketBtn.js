@@ -3,103 +3,100 @@ import ticketSchema from '../schemas/ticketSchema.js';
 import ticketSetupSchema from '../schemas/ticketSetupSchema.js';
 
 export default {
-  customId: 'claimTicketBtn',
-  userPermissions: [],
-  botPermissions: [],
+   customId: 'claimTicketBtn',
+   userPermissions: [],
+   botPermissions: [PermissionFlagsBits.ManageChannels],
 
-  run: async (client, interaction) => {
-    try {
-      const { member, channel, guild } = interaction;
+   run: async (client, interaction) => {
+      await interaction.deferReply({ ephemeral: true });
 
-      // Fetch the ticket setup from the database
-      const ticketSetup = await ticketSetupSchema.findOne({
-        guildID: guild.id,
-      });
+      try {
+         const { member, channel, guild } = interaction;
 
-      // Check if the ticket setup exists
-      if (!ticketSetup) {
-        return await interaction.reply({
-          content: 'Ticket setup not found.',
-          ephemeral: true,
-        });
+         const ticketSetup = await ticketSetupSchema.findOne({
+            guildID: guild.id,
+         });
+         if (!ticketSetup) {
+            return await interaction.editReply('Ticket setup not found.');
+         }
+
+         const staffRoleId = ticketSetup.staffRoleID;
+         if (!member.roles.cache.has(staffRoleId)) {
+            return await interaction.editReply(
+               'You do not have the necessary permissions to claim this ticket.'
+            );
+         }
+
+         const ticket = await ticketSchema.findOne({
+            ticketChannelID: channel.id,
+         });
+         if (!ticket) {
+            return await interaction.editReply('Ticket not found.');
+         }
+
+         if (ticket.claimedBy) {
+            return await interaction.editReply(
+               `This ticket has already been claimed by <@${ticket.claimedBy}>.`
+            );
+         }
+
+         // Update channel permissions
+         const permissionUpdates = [
+            {
+               id: member.id,
+               allow: [
+                  PermissionFlagsBits.ViewChannel,
+                  PermissionFlagsBits.SendMessages,
+                  PermissionFlagsBits.ManageChannels,
+               ],
+            },
+            {
+               id: guild.roles.everyone.id,
+               deny: [PermissionFlagsBits.ViewChannel],
+            },
+            {
+               id: ticket.ticketMemberID,
+               allow: [
+                  PermissionFlagsBits.ViewChannel,
+                  PermissionFlagsBits.SendMessages,
+               ],
+            },
+            { id: staffRoleId, deny: [PermissionFlagsBits.ViewChannel] },
+         ];
+
+         await Promise.all(
+            permissionUpdates.map((update) =>
+               channel.permissionOverwrites.edit(
+                  update.id,
+                  update.allow || update.deny
+               )
+            )
+         );
+
+         // Update ticket status in the database
+         ticket.claimedBy = member.id;
+         await ticket.save();
+
+         const claimEmbed = new EmbedBuilder()
+            .setColor('#00FF00')
+            .setDescription(`${member} has claimed this ticket.`)
+            .setTimestamp();
+
+         await interaction.deleteReply();
+         return await channel.send({ embeds: [claimEmbed] });
+      } catch (error) {
+         console.error('Error claiming ticket:', error);
+
+         if (error.code === 10062) {
+            return await interaction.followUp({
+               content: 'This interaction has expired. Please try again.',
+               ephemeral: true,
+            });
+         }
+
+         return await interaction.editReply(
+            'There was an error claiming the ticket. Please try again later.'
+         );
       }
-
-      // Check if the user has the required role to claim tickets
-      const staffRoleId = ticketSetup.staffRoleID;
-      if (!member.roles.cache.has(staffRoleId)) {
-        return await interaction.reply({
-          content: 'You do not have the necessary permissions to claim this ticket.',
-          ephemeral: true,
-        });
-      }
-
-      // Fetch the ticket from the database
-      const ticket = await ticketSchema.findOne({ ticketChannelID: channel.id });
-
-      // If the ticket does not exist, notify the user
-      if (!ticket) {
-        return await interaction.reply({
-          content: 'Ticket not found.',
-          ephemeral: true,
-        });
-      }
-
-      // If the ticket is already claimed, notify the user
-      if (ticket.claimedBy) {
-        return await interaction.reply({
-          content: `This ticket has already been claimed by <@${ticket.claimedBy}>.`,
-          ephemeral: true,
-        });
-      }
-
-      // Update channel permissions to allow the staff member to manage the ticket
-      await channel.permissionOverwrites.edit(member.id, {
-        [PermissionFlagsBits.ViewChannel]: true,
-        [PermissionFlagsBits.SendMessages]: true,
-        [PermissionFlagsBits.ManageChannels]: true,
-      });
-
-      // Update channel permissions to restrict others from viewing the channel
-      await channel.permissionOverwrites.edit(guild.roles.everyone.id, {
-        [PermissionFlagsBits.ViewChannel]: false,
-      });
-
-      // Allow the ticket member to still view and send messages in the channel
-      await channel.permissionOverwrites.edit(ticket.ticketMemberID, {
-        [PermissionFlagsBits.ViewChannel]: true,
-        [PermissionFlagsBits.SendMessages]: true,
-      });
-
-      // Restrict the staff role from viewing the ticket channel (optional, if required)
-      const staffRole = guild.roles.cache.get(staffRoleId);
-      if (staffRole) {
-        await channel.permissionOverwrites.edit(staffRole.id, {
-          [PermissionFlagsBits.ViewChannel]: false,
-        });
-      }
-
-      const claimEmbed = new EmbedBuilder()
-        .setColor('#00FF00')
-        .setDescription(`${member} has claimed this ticket.`)
-        .setTimestamp();
-
-      await channel.send({ embeds: [claimEmbed] });
-
-      // Update ticket status in the database
-      ticket.claimedBy = member.id;
-      await ticket.save();
-
-      return await interaction.reply({
-        content: 'You have claimed this ticket.',
-        ephemeral: true,
-      });
-    } catch (error) {
-      console.error('Error claiming ticket:', error);
-      // Notify the user if an error occurs
-      await interaction.reply({
-        content: 'There was an error claiming the ticket. Please try again later.',
-        ephemeral: true,
-      });
-    }
-  },
+   },
 };

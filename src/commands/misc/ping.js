@@ -1,60 +1,88 @@
-import { EmbedBuilder, SlashCommandBuilder } from 'discord.js';
-
+import {
+   EmbedBuilder,
+   SlashCommandBuilder,
+   version as discordJsVersion,
+} from 'discord.js';
 import { formatDistanceToNow } from 'date-fns';
+import os from 'os';
 
-// Export the module to be used elsewhere
 export default {
-    // Slash command data
-    data: new SlashCommandBuilder()
-        .setName('ping') 
-        .setDescription('Bot ping'), 
+   data: new SlashCommandBuilder()
+      .setName('ping')
+      .setDescription('Shows bot latency and other stats'),
 
-    userPermissions: [],
+   userPermissions: [],
+   botPermissions: [],
+   category: 'Misc',
+   cooldown: 5,
+   nwfwMode: false,
+   testMode: false,
+   devOnly: false,
+   prefix: true,
 
-    bot: [],
-    cooldown: 5, 
-    nwfwMode: false,
-    testMode: false,
-    devOnly: false,
+   run: async (client, interaction) => {
+      try {
+         const start = Date.now();
+         await interaction.deferReply();
+         const latency = Date.now() - start;
+         const apiPing = Math.round(client.ws.ping);
 
+         const getPingColor = (ping) =>
+            ping < 150 ? '#00ff00' : ping < 250 ? '#ffff00' : '#ff0000';
 
-    run: async (client, interaction) => {
-        if (interaction.replied || interaction.deferred) {
-            return;
-        }
+         client.commandStats ??= { pingCount: 0, totalPing: 0 };
+         client.commandStats.pingCount++;
+         client.commandStats.totalPing += apiPing;
 
-        let pingColor = '';
-        const ping = interaction.client.ws.ping;
+         const averagePing = (
+            client.commandStats.totalPing / client.commandStats.pingCount
+         ).toFixed(2);
+         const uptime = client.readyAt
+            ? formatDistanceToNow(client.readyAt, { addSuffix: true })
+            : 'Bot not ready';
 
-        if (ping < 150) {
-            pingColor = '#00ff00'; 
-        } else if (ping >= 150 && ping <= 250) {
-            pingColor = '#ffff00';
-        } else {
-            pingColor = '#ff0000'; 
-        }
+         const { heapUsed, rss } = process.memoryUsage();
+         const systemUptime = os.uptime();
 
-        const uptime = formatDistanceToNow(client.readyAt, { includeSeconds: true });
+         const stats = [
+            { name: '📡 Bot Latency', value: `${latency}ms` },
+            { name: '🌐 API Latency', value: `${apiPing}ms` },
+            { name: '📊 Average Ping', value: `${averagePing}ms` },
+            { name: '⏱️ Uptime', value: uptime },
+            {
+               name: '🖥️ Memory Usage',
+               value: `${(heapUsed / 1024 / 1024).toFixed(2)} MB / ${(rss / 1024 / 1024).toFixed(2)} MB`,
+            },
+            { name: '📚 Discord.js Version', value: discordJsVersion },
+            { name: '🛠️ Node.js Version', value: process.version },
+            {
+               name: '⚙️ System Uptime',
+               value: formatDistanceToNow(Date.now() - systemUptime * 1000, {
+                  addSuffix: true,
+               }),
+            },
+            {
+               name: '🔢 Command Usage',
+               value: `${client.commandStats.pingCount}`,
+            },
+         ];
 
-        if (!client.commandStats) {
-            client.commandStats = {};
-        }
-
-        client.commandStats.ping = (client.commandStats.ping || 0) + 1;
-
-        const totalPing = (client.commandStats.totalPing || 0) + ping;
-        const averagePing = totalPing / client.commandStats.ping;
-
-        const pongEmbed = new EmbedBuilder()
-            .setColor(pingColor) // Set embed color based on ping
-            .setTitle('Pong') // Set embed title
-            .setDescription(`**Ping:** ${ping} ms\n**Average Ping:** ${averagePing.toFixed(2)} ms\n**Uptime:** ${uptime}\n**Command Usage:** ${client.commandStats.ping}`)
+         const pongEmbed = new EmbedBuilder()
+            .setColor(getPingColor(apiPing))
+            .setTitle('🏓 Pong!')
+            .addFields(stats.map((stat) => ({ ...stat, inline: true })))
             .setFooter({
-                text: `Requested by ${interaction.user.username}`,
-                iconURL: `${interaction.user.displayAvatarURL({ dynamic: true })}`,
+               text: `Requested by ${interaction.user.username}`,
+               iconURL: interaction.user.displayAvatarURL({ dynamic: true }),
             })
-            .setTimestamp(); 
+            .setTimestamp();
 
-        await interaction.reply({ embeds: [pongEmbed] });
-    }
+         await interaction.editReply({ embeds: [pongEmbed] });
+      } catch (error) {
+         console.error('Error in ping command:', error);
+         await interaction.editReply(
+            'An error occurred while processing the command. Please try again later.'
+         );
+      }
+   },
 };

@@ -2,43 +2,57 @@ import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import getAllFiles from './getAllFiles.js';
 
-// Get the directory name of the current module's file
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-export default async (exceptions = []) => {
-  const localCommands = [];
-  const commandCategories = getAllFiles(path.join(__dirname, '..', 'commands'), true);
+/**
+ * Imports a single command file and returns the command object if valid.
+ * @param {string} commandFile - Path to the command file.
+ * @param {string[]} exceptions - List of command names to exclude.
+ * @returns {Object|null} The command object or null if invalid.
+ */
+async function importCommandFile(commandFile, exceptions) {
+   try {
+      const commandFileURL = pathToFileURL(commandFile).href;
+      const commandModule = await import(commandFileURL);
 
-  for (const commandCategory of commandCategories) {
-    const commandFiles = getAllFiles(commandCategory);
-
-    for (const commandFile of commandFiles) {
-      try {
-        // Convert the command file path to a file URL
-        const commandFileURL = pathToFileURL(commandFile).href;
-
-        // Dynamically import the module using the file URL
-        const commandModule = await import(commandFileURL);
-        
-        // Check if the module has a default export
-        if (commandModule.default) {
-          const commandObject = commandModule.default;
-          
-          // Check if the commandObject has a name property
-          if (commandObject.data && commandObject.data.name && !exceptions.includes(commandObject.data.name)) {
-            localCommands.push(commandObject);
-          } else {
-            console.warn(`Command file ${commandFile} does not have a valid name property.`);
-          }
-        } else {
-          console.warn(`Command file ${commandFile} does not have a default export.`);
-        }
-  
-      } catch (error) {
-        console.error(`Error importing command file ${commandFile}: ${error}`);
+      if (!commandModule?.default?.data?.name) {
+         console.warn(`Command file ${commandFile} is invalid.`);
+         return null;
       }
-    }
-  }
 
-  return localCommands;
-};
+      const commandObject = commandModule.default;
+
+      if (exceptions.includes(commandObject.data.name)) {
+         console.warn(
+            `Command ${commandObject.data.name} is in the exception list.`
+         );
+         return null;
+      }
+
+      return commandObject;
+   } catch (error) {
+      console.error(
+         `Error importing command file ${commandFile}: ${error.message}`
+      );
+      return null;
+   }
+}
+
+/**
+ * Loads all valid command files from the commands directory.
+ * @param {string[]} exceptions - List of command names to exclude.
+ * @returns {Promise<Object[]>} Array of valid command objects.
+ */
+export default async function loadCommands(exceptions = []) {
+   const commandsDir = path.join(__dirname, '..', 'commands');
+   const allCommandFiles = getAllFiles(commandsDir).filter((file) =>
+      file.endsWith('.js')
+   );
+
+   const commandPromises = allCommandFiles.map((file) =>
+      importCommandFile(file, exceptions)
+   );
+   const commands = await Promise.all(commandPromises);
+
+   return commands.filter(Boolean);
+}

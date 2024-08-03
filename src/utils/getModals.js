@@ -6,23 +6,35 @@ import getAllFiles from './getAllFiles.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default async (exceptions = []) => {
-  let modals = [];
-  const modalFiles = getAllFiles(path.join(__dirname, '..', 'modals'));
+   const modalFiles = getAllFiles(path.join(__dirname, '..', 'modals'));
 
-  for (const modalFile of modalFiles) {
-    try {
-      // Convert the modal file path to a file URL
-      const modalFileURL = pathToFileURL(modalFile).href;
+   // Function to import and validate a single modal file
+   const importAndValidateModal = async (modalFile) => {
+      try {
+         // Convert the modal file path to a file URL
+         const modalFileURL = pathToFileURL(modalFile).href;
 
-      // Dynamically import the module using the file URL
-      const { default: modalObject } = await import(modalFileURL);
+         // Dynamically import the module using the file URL
+         const { default: modalObject } = await import(modalFileURL);
 
-      if (exceptions.includes(modalObject.name)) continue;
-      modals.push(modalObject);
-    } catch (error) {
-      console.error(`Error importing modal file ${modalFile}: ${error}`);
-    }
-  }
+         // Check if the modal name is in the exceptions list
+         if (exceptions.includes(modalObject.name)) return null;
 
-  return modals;
+         return modalObject;
+      } catch (error) {
+         console.error(
+            `Error importing modal file ${modalFile}: ${error.message}`
+         );
+         return null;
+      }
+   };
+
+   // Import all modal files in parallel
+   const modalPromises = modalFiles.map(importAndValidateModal);
+   const modalObjects = await Promise.all(modalPromises);
+
+   // Filter out any null values (failed imports or exceptions)
+   const modals = modalObjects.filter((modalObject) => modalObject !== null);
+
+   return modals;
 };

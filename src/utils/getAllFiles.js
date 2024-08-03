@@ -1,24 +1,36 @@
 import fs from 'fs';
 import path from 'path';
 
-export default (directory, foldersOnly = false) => {
-  const items = [];
+/**
+ * Get a list of files and/or directories within a specified directory.
+ *
+ * @param {string} directory - The directory to read.
+ * @param {boolean} [foldersOnly=false] - If true, only directories will be included in the result.
+ * @returns {string[]} - List of file or directory paths.
+ */
+const getAllFiles = (directory, foldersOnly = false) => {
+   const stack = [directory];
+   const result = [];
 
-  const files = fs.readdirSync(directory, { withFileTypes: true });
+   while (stack.length > 0) {
+      const currentPath = stack.pop();
+      const items = fs.readdirSync(currentPath, { withFileTypes: true });
 
-  for (const file of files) {
-    const filePath = path.join(directory, file.name); // Using file.name to get the proper name
+      for (const item of items) {
+         const fullPath = path.join(currentPath, item.name);
 
-    if (foldersOnly) {
-      if (file.isDirectory()) {
-        items.push(filePath);
+         if (item.isDirectory()) {
+            if (foldersOnly) {
+               result.push(fullPath);
+            }
+            stack.push(fullPath);
+         } else if (!foldersOnly && item.isFile()) {
+            result.push(fullPath);
+         }
       }
-    } else {
-      if (file.isFile()) {
-        items.push(filePath);
-      }
-    }
-  }
+   }
 
-  return items;
+   return result;
 };
+
+export default getAllFiles;

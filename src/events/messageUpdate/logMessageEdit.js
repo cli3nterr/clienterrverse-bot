@@ -1,72 +1,134 @@
-import config from '../../config/config.json' assert { type: 'json' };
+import { config } from '../../config/config.js';
 import { EmbedBuilder } from 'discord.js';
 
-export default async (client, oldMessage, newMessage) => {
-    try {
-        // Ignore messages from other bots
-        if (newMessage.author.bot) return;
+const EMOJIS = {
+   EDIT: '✏️',
+   AUTHOR: '👤',
+   CHANNEL: '💬',
+   TIME: '🕒',
+   ID: '🔢',
+   SERVER: '🏠',
+   OLD: '⬅️',
+   NEW: '➡️',
+   EMBED: '🖼️',
+   ERROR: '❌',
+};
 
-        // Check if the message is from the test server
-        if (newMessage.guild.id !== config.testServerId) return;
+const createMessageEmbed = (oldMessage, newMessage, author, time) => {
+   const oldContent = oldMessage.content || '*Message content not available*';
+   const newContent = newMessage.content || '*Message content not available*';
 
-        const channelId = config.logChannel; // Replace with your log channel ID
+   return new EmbedBuilder()
+      .setColor('#FFA500')
+      .setTitle(`${EMOJIS.EDIT} Message Edited`)
+      .setThumbnail(author.displayAvatarURL())
+      .addFields(
+         {
+            name: `${EMOJIS.AUTHOR} Author`,
+            value: `${author.tag} (ID: ${author.id})`,
+            inline: true,
+         },
+         {
+            name: `${EMOJIS.CHANNEL} Channel`,
+            value: `${newMessage.channel.name} (ID: ${newMessage.channel.id})`,
+            inline: true,
+         },
+         { name: `${EMOJIS.OLD} Old Content`, value: oldContent },
+         { name: `${EMOJIS.NEW} New Content`, value: newContent },
+         { name: `${EMOJIS.TIME} Time`, value: time, inline: true },
+         {
+            name: `${EMOJIS.ID} Message ID`,
+            value: newMessage.id,
+            inline: true,
+         },
+         {
+            name: `${EMOJIS.SERVER} Server`,
+            value: newMessage.guild.name,
+            inline: true,
+         }
+      )
+      .setFooter({
+         text: `Message Logger | ${newMessage.client.user.tag}`,
+         iconURL: newMessage.client.user.displayAvatarURL(),
+      })
+      .setTimestamp();
+};
 
-        // Fetch the logging channel
-        const channel = client.channels.cache.get(channelId);
-        if (!channel) {
-            console.error(`Log channel with ID ${channelId} not found.`);
-            return;
-        }
+const addEmbedFields = (embed, oldMessage, newMessage) => {
+   const oldEmbeds =
+      oldMessage.embeds.length > 0
+         ? oldMessage.embeds.map((e) => e.toJSON())
+         : null;
+   const newEmbeds =
+      newMessage.embeds.length > 0
+         ? newMessage.embeds.map((e) => e.toJSON())
+         : null;
 
-        const author = newMessage.author;
-        const oldContent = oldMessage.content || '*Message content not available*';
-        const newContent = newMessage.content || '*Message content not available*';
-        const time = newMessage.editedAt ? newMessage.editedAt.toLocaleString() : new Date().toLocaleString();
+   if (oldEmbeds) {
+      embed.addFields({
+         name: `${EMOJIS.EMBED} Old Embeds`,
+         value: JSON.stringify(oldEmbeds, null, 2).slice(0, 1024),
+      });
+   }
+   if (newEmbeds) {
+      embed.addFields({
+         name: `${EMOJIS.EMBED} New Embeds`,
+         value: JSON.stringify(newEmbeds, null, 2).slice(0, 1024),
+      });
+   }
+};
 
-        // Create the embed
-        const embed = new EmbedBuilder()
-            .setColor('#0099ff')
-            .setTitle('Message Edited')
-            .setThumbnail(author.displayAvatarURL())
-            .addFields(
-                { name: 'Author', value: `${author.tag} (ID: ${author.id})`, inline: true },
-                { name: 'Channel', value: `${newMessage.channel.name} (ID: ${newMessage.channel.id})`, inline: true },
-                { name: 'Old Content', value: oldContent },
-                { name: 'New Content', value: newContent },
-                { name: 'Time', value: time, inline: true },
-                { name: 'Message ID', value: newMessage.id, inline: true },
-                { name: 'Server', value: newMessage.guild.name, inline: true }
-            )
-            .setFooter({ text: `Message Logger | ${client.user.tag}`, iconURL: client.user.displayAvatarURL() })
-            .setTimestamp();
+const createErrorEmbed = (error, client) => {
+   return new EmbedBuilder()
+      .setColor('#FF0000')
+      .setTitle(`${EMOJIS.ERROR} Error Logging Edited Message`)
+      .setDescription(
+         `An error occurred while attempting to log an edited message: ${error.message}`
+      )
+      .setFooter({
+         text: `Message Logger | ${client.user.tag}`,
+         iconURL: client.user.displayAvatarURL(),
+      })
+      .setTimestamp();
+};
 
-        // Send the embed to the logging channel
-        await channel.send({ embeds: [embed] });
+export default async (client, errorHandler, oldMessage, newMessage) => {
+   if (newMessage.author.bot || newMessage.guild.id !== config.testServerId)
+      return;
+   if (
+      oldMessage.content === newMessage.content &&
+      oldMessage.embeds.length === newMessage.embeds.length &&
+      oldMessage.attachments.size === newMessage.attachments.size
+   )
+      return;
 
-    } catch (error) {
-        console.error('Error logging edited message:', error);
+   const logChannel = client.channels.cache.get(config.logChannel);
+   if (!logChannel) {
+      console.error(`Log channel with ID ${config.logChannel} not found.`);
+      return;
+   }
 
-        // Attempt to log the error in the logging channel
-        try {
-            const errorChannel = client.channels.cache.get(config.logChannel);
-            if (!errorChannel) {
-                console.error(`Log channel with ID ${config.logChannel} not found.`);
-                return;
-            }
+   try {
+      const time = newMessage.editedAt
+         ? newMessage.editedAt.toLocaleString()
+         : new Date().toLocaleString();
+      const embed = createMessageEmbed(
+         oldMessage,
+         newMessage,
+         newMessage.author,
+         time
+      );
+      addEmbedFields(embed, oldMessage, newMessage);
 
-            // Create an error embed
-            const errorEmbed = new EmbedBuilder()
-                .setColor('#FF0000')
-                .setTitle('Error Logging Edited Message')
-                .setDescription(`An error occurred while attempting to log an edited message: ${error.message}`)
-                .setFooter({ text: `Message Logger | ${client.user.tag}`, iconURL: client.user.displayAvatarURL() })
-                .setTimestamp();
+      await logChannel.send({ embeds: [embed] });
+   } catch (error) {
+      console.error('Error logging edited message:', error);
 
-            // Send the error embed to the logging channel
-            await errorChannel.send({ embeds: [errorEmbed] });
-
-        } catch (innerError) {
-            console.error('Error logging the error:', innerError);
-        }
-    }
+      try {
+         const errorEmbed = createErrorEmbed(error, client);
+         await logChannel.send({ embeds: [errorEmbed] });
+      } catch (innerError) {
+         console.error('Error logging the error:', innerError);
+      }
+   }
 };

@@ -1,21 +1,34 @@
+const REACTION_EMOJI = '👋';
+const REPLY_CHANCE = 0.1; // 10% chance to reply with a message
 
-export default async (client, message) => {
-  // Ignore messages from other bots
-  if (message.author.bot) return;
+const randomReplies = [
+   'Hello there!',
+   'How can I help you today?',
+   'Nice to see you!',
+   "What's on your mind?",
+   "I'm all ears!",
+];
 
-  // Flag indicating if the message is a direct mention of the bot, excluding @everyone and @here
-  const isDirectMention =
-    message.mentions.has(client.user) &&
-    message.author.id !== client.user.id &&
-    !message.content.match(/(@)?(everyone|here)/gi);
+export default async (client, errorHandler, message) => {
+   if (message.author.bot) return;
 
-  // Check if the message is not a reply and is a direct mention
-  if (!message.reference && isDirectMention) {
-    try {
-      // Add your preferred emoji reaction
-      await message.react("👋");
-    } catch (error) {
-      console.error("Error reacting to message:", error);
-    }
-  }
+   const isDirectMention =
+      message.mentions.has(client.user) &&
+      message.author.id !== client.user.id &&
+      !message.content.match(/@(everyone|here)/gi);
+
+   if (!message.reference && isDirectMention) {
+      try {
+         await message.react(REACTION_EMOJI);
+
+         if (Math.random() < REPLY_CHANCE) {
+            const reply =
+               randomReplies[Math.floor(Math.random() * randomReplies.length)];
+            await message.reply(reply);
+         }
+      } catch (error) {
+         console.error('Error processing message:', error);
+      }
+   }
+
 };

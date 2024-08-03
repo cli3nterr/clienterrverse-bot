@@ -1,71 +1,307 @@
-/** @format */
-// Credit: This code is adapted from the Nory bot
+import {
+   EmbedBuilder,
+   SlashCommandBuilder,
+   ActionRowBuilder,
+   ButtonBuilder,
+   ButtonStyle,
+   PermissionFlagsBits,
+} from 'discord.js';
+import {
+   Avatar,
+   AvatarRating,
+   AvatarChallenge,
+} from '../../schemas/AvatarSchema.js';
 
-import { EmbedBuilder, SlashCommandBuilder } from 'discord.js';
-
-// Export the modulFe to be used elsewhere
 export default {
-  // Slash command data
-  data: new SlashCommandBuilder()
-    .setName("avatar") // Sets the command name
-    .setDescription("Show avatar of any user") // Sets the command description
-    .addUserOption((option) =>
-      option
-        .setName("user") // Adds a user option to specify the user whose avatar to show
-        .setDescription("User whose avatar you want to see:") // Option description
-        .setRequired(true)
-    ), // Option is required
+   data: new SlashCommandBuilder()
+      .setName('avatar')
+      .setDescription('Show avatar of any user')
+      .addUserOption((option) =>
+         option
+            .setName('user')
+            .setDescription('User whose avatar you want to see:')
+            .setRequired(false)
+      ),
 
-  userPermissions: [], // No user permissions required
-  botPermissions: [], // No bot permissions required
-  cooldown: 5,
-  deleted: false, 
-  nwfwMode: false,
-  testMode: false,
-  devOnly: false,
+   userPermissions: [],
+   botPermissions: [],
+   category: 'Misc',
+   cooldown: 5,
+   deleted: false,
+   nwfwMode: false,
+   testMode: false,
+   devOnly: false,
+   prefix: true,
 
-  // Function to be executed when the command is used
-  run: async (client, interaction) => {
-    try {
-      // Get the specified user
-      const user = interaction.options.getUser("user");
-      // Get the member from the guild or interaction member
-      const member =
-        interaction.guild.members.cache.find((m) => m.user.id === user.id) ||
-        interaction.member;
+   run: async (client, interaction) => {
+      try {
+         await interaction.deferReply();
 
-      // Get the avatar URL of the user
-      const avatar = member.user.displayAvatarURL({
-        format: "png",
-        dynamic: true,
-        size: 1024,
-      });
+         const user = interaction.options.getUser('user') || interaction.user;
+         const member = interaction.guild.members.cache.get(user.id);
 
-      // Construct embed to display the user's avatar
-      const embed = new EmbedBuilder()
-        .setTitle(`${member.user.username}'s Avatar`) // Set the title as the username followed by "Avatar"
-        .setURL(avatar) // Set the URL of the embed to the avatar URL
-        .setImage(avatar) // Set the image of the embed to the avatar URL
-        .setFooter({
-          text: `Requested by ${interaction.user.username}`, // Set the footer text as the username of the requester
-          iconURL: interaction.user.displayAvatarURL({
-            format: "png",
-            dynamic: true,
-            size: 1024,
-          }), // Set the footer icon as the requester's avatar
-        })
-        .setColor("#eb3434"); // Set the embed color
+         const getAvatarUrl = (userOrMember, size = 1024) => {
+            return userOrMember.displayAvatarURL({
+               format: 'png',
+               dynamic: true,
+               size: size,
+            });
+         };
 
-      // Send the embed containing the user's avatar as a reply
-      await interaction.reply({ embeds: [embed] });
-    } catch (error) {
-      console.error(`An error occurred in the avatar command: ${error}`);
-      // Send an error message if an error occurs
-      await interaction.reply({
-        content:
-          "An error occurred while processing your command. Please try again later.",
-        ephemeral: true,
-      });
-    }
-  },
+         const userAvatar = getAvatarUrl(user);
+         const memberAvatar = member ? getAvatarUrl(member) : null;
+
+         // Save the current avatar to the database only if it's different from the last one
+         let newAvatar = await Avatar.findOne({
+            userId: user.id,
+            guildId: interaction.guild.id,
+         }).sort({ timestamp: -1 });
+
+         if (!newAvatar || newAvatar.avatarUrl !== userAvatar) {
+            newAvatar = new Avatar({
+               userId: user.id,
+               guildId: interaction.guild.id,
+               avatarUrl: userAvatar,
+               isGlobal: true,
+            });
+            await newAvatar.save();
+         }
+
+         // Fetch avatar history
+         const avatarHistory = await Avatar.find({
+            userId: user.id,
+            guildId: interaction.guild.id,
+         })
+            .sort({ timestamp: -1 })
+            .limit(5);
+
+         // Fetch avatar rating
+         const avatarRatings = await AvatarRating.find({
+            avatarId: newAvatar._id,
+         });
+         const averageRating =
+            avatarRatings.length > 0
+               ? (
+                    avatarRatings.reduce(
+                       (sum, rating) => sum + rating.rating,
+                       0
+                    ) / avatarRatings.length
+                 ).toFixed(1)
+               : 'No ratings yet';
+
+         // Fetch active avatar challenge
+         const activeChallenge = await AvatarChallenge.findOne({
+            guildId: interaction.guild.id,
+            startDate: { $lte: new Date() },
+            endDate: { $gte: new Date() },
+         });
+
+         const embed = new EmbedBuilder()
+            .setTitle(`${user.username}'s Avatar`)
+            .setDescription(`[Avatar URL](${userAvatar})`)
+            .setImage(userAvatar)
+            .setColor(member?.displayHexColor || '#eb3434')
+            .addFields(
+               { name: '🆔 User ID', value: user.id, inline: true },
+               {
+                  name: '📅 Account Created',
+                  value: `<t:${Math.floor(user.createdTimestamp / 1000)}:R>`,
+                  inline: true,
+               },
+               {
+                  name: '🎭 Activity Status',
+                  value: member?.presence?.status || 'Offline',
+                  inline: true,
+               },
+               {
+                  name: '📆 Server Join Date',
+                  value: member
+                     ? `<t:${Math.floor(member.joinedTimestamp / 1000)}:R>`
+                     : 'N/A',
+                  inline: true,
+               },
+               {
+                  name: '👑 Roles',
+                  value: member
+                     ? member.roles.cache
+                          .filter((r) => r.id !== interaction.guild.id)
+                          .map((r) => `<@&${r.id}>`)
+                          .join(', ') || 'None'
+                     : 'N/A',
+                  inline: false,
+               },
+               {
+                  name: '📜 Avatar History',
+                  value:
+                     avatarHistory
+                        .map(
+                           (a, index) =>
+                              `[${index === 0 ? 'Current' : `${index + 1}`}](${a.avatarUrl})`
+                        )
+                        .join(' | ') || 'No history available',
+                  inline: false,
+               },
+               {
+                  name: '⭐ Average Rating',
+                  value:
+                     averageRating +
+                     (averageRating !== 'No ratings yet' ? '/5' : ''),
+                  inline: true,
+               }
+            )
+            .setFooter({
+               text: `Requested by ${interaction.user.username}`,
+               iconURL: getAvatarUrl(interaction.user, 32),
+            })
+            .setTimestamp();
+
+         if (memberAvatar && memberAvatar !== userAvatar) {
+            embed.addFields({
+               name: '🔗 Server Avatar',
+               value: `[View](${memberAvatar})`,
+               inline: true,
+            });
+         }
+
+         if (activeChallenge) {
+            embed.addFields({
+               name: '🏆 Active Avatar Challenge',
+               value: `"${activeChallenge.title}" - Ends <t:${Math.floor(activeChallenge.endDate.getTime() / 1000)}:R>`,
+               inline: false,
+            });
+         }
+
+         const row1 = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+               .setLabel('🌐 View in Browser')
+               .setStyle(ButtonStyle.Link)
+               .setURL(userAvatar),
+            new ButtonBuilder()
+               .setCustomId('avatar_refresh')
+               .setLabel('🔄 Refresh')
+               .setStyle(ButtonStyle.Primary),
+            new ButtonBuilder()
+               .setCustomId('avatar_delete')
+               .setLabel('🗑️ Delete')
+               .setStyle(ButtonStyle.Danger),
+            new ButtonBuilder()
+               .setCustomId('avatar_compare')
+               .setLabel('🔍 Compare Avatars')
+               .setStyle(ButtonStyle.Secondary)
+               .setDisabled(!memberAvatar || memberAvatar === userAvatar)
+         );
+
+         const row2 = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+               .setCustomId('avatar_rate')
+               .setLabel('⭐ Rate Avatar')
+               .setStyle(ButtonStyle.Success)
+         );
+
+
+
+         const response = await interaction.editReply({
+            embeds: [embed],
+            components: [row1, row2],
+         });
+
+         const collector = response.createMessageComponentCollector({
+            time: 60000,
+         });
+
+         collector.on('collect', async (i) => {
+            if (i.user.id !== interaction.user.id) {
+               return i.reply({
+                  content: 'You cannot use these buttons.',
+                  ephemeral: true,
+               });
+            }
+
+            switch (i.customId) {
+               case 'avatar_refresh':
+                  const refreshedEmbed = EmbedBuilder.from(embed).setImage(
+                     getAvatarUrl(user, 1024) + '?t=' + Date.now()
+                  );
+                  await i.update({ embeds: [refreshedEmbed] });
+                  break;
+               case 'avatar_delete':
+                  await i.message.delete();
+                  break;
+               case 'avatar_compare':
+                  const compareEmbed = new EmbedBuilder()
+                     .setTitle(`Avatar Comparison for ${user.username}`)
+                     .setDescription('Global Avatar vs Server Avatar')
+                     .setColor(member?.displayHexColor || '#eb3434')
+                     .setImage(userAvatar)
+                     .setThumbnail(memberAvatar);
+                  await i.update({ embeds: [compareEmbed] });
+                  break;
+
+               case 'avatar_rate':
+                  const existingRating = await AvatarRating.findOne({
+                     avatarId: newAvatar._id,
+                     raterId: i.user.id,
+                  });
+
+                  if (existingRating) {
+                     return i.reply({
+                        content: 'You have already rated this avatar.',
+                        ephemeral: true,
+                     });
+                  }
+
+                  const rating = Math.floor(Math.random() * 5) + 1;
+                  const newRating = new AvatarRating({
+                     avatarId: newAvatar._id,
+                     raterId: i.user.id,
+                     rating: rating,
+                  });
+                  await newRating.save();
+
+                  // Update the average rating in the embed
+                  const updatedRatings = await AvatarRating.find({
+                     avatarId: newAvatar._id,
+                  });
+                  const newAverageRating = (
+                     updatedRatings.reduce((sum, r) => sum + r.rating, 0) /
+                     updatedRatings.length
+                  ).toFixed(1);
+                  embed.spliceFields(-2, 1, {
+                     name: '⭐ Average Rating',
+                     value: `${newAverageRating}/5`,
+                     inline: true,
+                  });
+
+                  await i.update({
+                     content: `You rated this avatar ${rating}/5 stars!`,
+                     embeds: [embed],
+                  });
+                  break;
+            }
+         });
+
+         collector.on('end', async () => {
+            const disabledRow1 = ActionRowBuilder.from(row1).setComponents(
+               row1.components.map((component) =>
+                  ButtonBuilder.from(component).setDisabled(true)
+               )
+            );
+            const disabledRow2 = ActionRowBuilder.from(row2).setComponents(
+               row2.components.map((component) =>
+                  ButtonBuilder.from(component).setDisabled(true)
+               )
+            );
+            await response
+               .edit({ components: [disabledRow1, disabledRow2] })
+               .catch(() => {});
+         });
+      } catch (error) {
+         console.error('Error in avatar command:', error);
+         await interaction.editReply({
+            content:
+               'An error occurred while processing the command. Please try again later.',
+            ephemeral: true,
+         });
+      }
+   },
 };

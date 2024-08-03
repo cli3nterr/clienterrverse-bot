@@ -1,83 +1,164 @@
+/** @format */
+
 import 'colors';
-import { Client, EmbedBuilder } from 'discord.js';
-import config from '../../config/config.json' assert { type: 'json' };
-import mConfig from '../../config/messageConfig.json' assert { type: 'json' };
+import { EmbedBuilder, Collection, PermissionsBitField } from 'discord.js';
+import { config } from '../../config/config.js';
+import mConfig from '../../config/messageConfig.js';
 import getSelects from '../../utils/getSelects.js';
 
+const selects = new Collection();
+let selectsLoaded = false;
+
+const sendEmbedReply = async (
+   interaction,
+   color,
+   description,
+   ephemeral = true
+) => {
+   try {
+      const embed = new EmbedBuilder()
+         .setColor(color)
+         .setDescription(description)
+         .setAuthor({
+            name: interaction.user.username,
+            iconURL: interaction.user.displayAvatarURL({ dynamic: true })
+         })
+         .setTimestamp(); 
+
+      await interaction.reply({ embeds: [embed], ephemeral });
+   } catch (err) {
+   }
+};
 
 
-export default async (client, interaction) => {
-  if (!interaction.isAnySelectMenu()) return;
-  const selects = await getSelects();
-  const { developersId, testServerId } = config;
+const checkPermissions = (interaction, permissions, type) => {
+   const member =
+      type === 'user' ? interaction.member : interaction.guild.members.me;
+   return permissions.every((permission) =>
+      member.permissions.has(PermissionsBitField.Flags[permission])
+   );
+};
 
-  try {
-    const selectObject = selects.find(
-      (select) => select.customId === interaction.customId
-    );
-    if (!selectObject) return;
-
-    if (selectObject.devOnly) {
-      if (!developersId.includes(interaction.member.id)) {
-        const rEmbed = new EmbedBuilder()
-          .setColor(`${mConfig.embedColorError}`)
-          .setDescription(`${mConfig.commandDevOnly}`);
-        interaction.reply({ embeds: [rEmbed], ephemeral: true });
-        return;
+const loadSelects = async (errorHandler) => {
+   try {
+      const selectFiles = await getSelects();
+      for (const select of selectFiles) {
+         if (select && select.customId) {
+            selects.set(select.customId, select);
+         }
       }
-    }
+      console.log(`Loaded ${selects.size} select menu commands`.green);
+      selectsLoaded = true;
+   } catch (error) {
+      errorHandler.handleError(error, { type: 'selectLoad' });
+      console.error('Error loading select menus:'.red, error);
+   }
+};
 
-    if (selectObject.testMode) {
-      if (interaction.guild.id !== testServerId) {
-        const rEmbed = new EmbedBuilder()
-          .setColor(`${mConfig.embedColorError}`)
-          .setDescription(`${mConfig.commandTestMode}`);
-        interaction.reply({ embeds: [rEmbed], ephemeral: true });
-        return;
+const handleSelect = async (client, errorHandler, interaction) => {
+   const { customId } = interaction;
+   const selectObject = selects.get(customId);
+   if (!selectObject) return;
+
+   const { developersId, testServerId } = config;
+
+   if (selectObject.devOnly && !developersId.includes(interaction.user.id)) {
+      return sendEmbedReply(
+         interaction,
+         mConfig.embedColorError,
+         mConfig.commandDevOnly
+      );
+   }
+
+   if (
+      selectObject.testMode &&
+      interaction.guild &&
+      interaction.guild.id !== testServerId
+   ) {
+      return sendEmbedReply(
+         interaction,
+         mConfig.embedColorError,
+         mConfig.commandTestMode
+      );
+   }
+
+   if (
+      selectObject.userPermissions?.length &&
+      !checkPermissions(interaction, selectObject.userPermissions, 'user')
+   ) {
+      return sendEmbedReply(
+         interaction,
+         mConfig.embedColorError,
+         mConfig.userNoPermissions
+      );
+   }
+
+   if (
+      selectObject.botPermissions?.length &&
+      !checkPermissions(interaction, selectObject.botPermissions, 'bot')
+   ) {
+      return sendEmbedReply(
+         interaction,
+         mConfig.embedColorError,
+         mConfig.botNoPermissions
+      );
+   }
+
+   if (
+      interaction.message.interaction &&
+      interaction.message.interaction.user.id !== interaction.user.id
+   ) {
+      return sendEmbedReply(
+         interaction,
+         mConfig.embedColorError,
+         mConfig.cannotUseSelect
+      );
+   }
+
+   if (selectObject.cooldown) {
+      const cooldownKey = `${interaction.user.id}-${customId}`;
+      const cooldownTime = selects.get(cooldownKey);
+      if (cooldownTime && Date.now() < cooldownTime) {
+         const remainingTime = Math.ceil((cooldownTime - Date.now()) / 1000);
+         return sendEmbedReply(
+            interaction,
+            mConfig.embedColorError,
+            `Please wait ${remainingTime} seconds before using this select menu again.`
+         );
       }
-    }
+      selects.set(cooldownKey, Date.now() + selectObject.cooldown * 1000);
+   }
 
-    if (selectObject.userPermissions?.length) {
-      for (const permission of selectObject.userPermissions) {
-        if (interaction.member.permissions.has(permission)) {
-          continue;
-        }
-        const rEmbed = new EmbedBuilder()
-          .setColor(`${mConfig.embedColorError}`)
-          .setDescription(`${mConfig.userNoPermissions}`);
-        interaction.reply({ embeds: [rEmbed], ephemeral: true });
-        return;
-      }
-    }
+   try {
+      await selectObject.run(client, interaction);
+      console.log(
+         `Select menu ${interaction.customId} used by ${interaction.user.tag} in ${interaction.guild?.name}`
+            .yellow
+      );
+   } catch (error) {
+      console.error(`Error executing select menu ${customId}:`.red, error);
 
-    if (selectObject.botPermissions?.length) {
-      for (const permission of selectObject.botPermissions) {
-        const bot = interaction.guild.members.me;
-        if (bot.permissions.has(permission)) {
-          continue;
-        }
-        const rEmbed = new EmbedBuilder()
-          .setColor(`${mConfig.embedColorError}`)
-          .setDescription(`${mConfig.botNoPermissions}`);
-        interaction.reply({ embeds: [rEmbed], ephemeral: true });
-        return;
-      }
-    }
+      await errorHandler.handleError(error, {
+         type: 'selectError',
+         selectId: customId,
+         userId: interaction.user.id,
+         guildId: interaction.guild?.id,
+      });
 
-    if (interaction.message.interaction) {
-        if (interaction.message.interaction.user.id !== interaction.user.id) {
-          const rEmbed = new EmbedBuilder()
-            .setColor(`${mConfig.embedColorError}`)
-            .setDescription(`${mConfig.cannotUseSelect}`);
-          interaction.reply({ embeds: [rEmbed], ephemeral: true });
-          return;
-        };
-      };
+      sendEmbedReply(
+         interaction,
+         mConfig.embedColorError,
+         'There was an error while processing this select menu!'
+      );
+   }
+};
 
-    await selectObject.run(client, interaction);
-  } catch (err) {
-    console.log(
-      `An error occurred while validating select menus! ${err}`.red
-    );
-  }
+export default async (client, errorHandler, interaction) => {
+   if (!interaction.isAnySelectMenu()) return;
+
+   if (!selectsLoaded) {
+      await loadSelects(errorHandler);
+   }
+
+   await handleSelect(client, errorHandler, interaction);
 };

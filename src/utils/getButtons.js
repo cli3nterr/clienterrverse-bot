@@ -2,24 +2,41 @@ import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import getAllFiles from './getAllFiles.js';
 
-
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+export default async (exceptions = []) => {
+   const buttons = [];
 
-export default async(exepctions = []) => {
-  let buttons = [];
-  const buttonFiles = getAllFiles(path.join(__dirname, "..", "buttons"));
+   // Get  button files
+   const buttonFiles = getAllFiles(path.join(__dirname, '..', 'buttons'));
 
-  for (const buttonFile of buttonFiles) {
-    const buttonFileURL = pathToFileURL(buttonFile).href;
+   // Import  button file
+   for (const buttonFile of buttonFiles) {
+      const buttonFileURL = pathToFileURL(buttonFile).href;
 
+      try {
+         const { default: buttonObject } = await import(buttonFileURL);
 
+         // Check object is valid
+         if (
+            !buttonObject ||
+            typeof buttonObject !== 'object' ||
+            !buttonObject.customId
+         ) {
+            console.warn(
+               `Skipped importing ${buttonFileURL} as it does not export a valid button object.`
+            );
+            continue;
+         }
 
-    const {default: buttonObject} = await import(buttonFileURL);
+         // Skip
+         if (exceptions.includes(buttonObject.customId)) continue;
 
-    if (exepctions.includes(buttonObject.name)) continue;
-    buttons.push(buttonObject);
-  };
+         buttons.push(buttonObject);
+      } catch (error) {
+         console.error(`Failed to import ${buttonFileURL}: ${error.message}`);
+      }
+   }
 
-  return buttons;
+   return buttons;
 };
