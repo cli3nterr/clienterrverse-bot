@@ -56,7 +56,9 @@ async function deleteUnusedCommands(
    );
 
    await Promise.all(
-      commandsToDelete.map(deleteCommand(applicationCommands, errorHandler))
+      commandsToDelete.map((cmd) =>
+         deleteCommand(applicationCommands, errorHandler)(cmd)
+      )
    );
 }
 
@@ -167,6 +169,8 @@ async function handleExistingCommand(
             name: commandName,
             description: data.description,
             options: data.options,
+            contexts: data.contexts,
+            integration_types: data.integration_types,
          });
          console.log(
             `[${new Date().toISOString()}] Updated command: ${commandName}`
@@ -197,6 +201,8 @@ async function createCommand(applicationCommands, data, errorHandler) {
          name: data.name,
          description: data.description,
          options: data.options,
+         contexts: data.contexts,
+         integration_types: data.integration_types,
       });
       console.log(
          `[${new Date().toISOString()}] Registered new command: ${data.name}`

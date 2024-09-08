@@ -46,15 +46,13 @@ const sendEmbedReply = async (
          .setDescription(description)
          .setAuthor({
             name: interaction.user.username,
-            iconURL: interaction.user.displayAvatarURL({ dynamic: true })
+            iconURL: interaction.user.displayAvatarURL({ dynamic: true }),
          })
-         .setTimestamp(); 
+         .setTimestamp();
 
       await interaction.reply({ embeds: [embed], ephemeral });
-   } catch (err) {
-   }
+   } catch (err) {}
 };
-
 
 const getCachedData = async (key, fetchFunction) => {
    const cachedItem = cache.get(key);
@@ -79,11 +77,13 @@ const initializeCommandMap = async () => {
 };
 
 const applyCooldown = (interaction, commandName, cooldownAmount) => {
+   if (isNaN(cooldownAmount) || cooldownAmount <= 0) {
+      throw new Error('Invalid cooldown amount');
+   }
+
    const userCooldowns = cooldowns.get(commandName) || new Collection();
    const now = Date.now();
-   const userId = `${interaction.user.id}-${
-      interaction.guild ? interaction.guild.id : 'DM'
-   }`;
+   const userId = `${interaction.user.id}-${interaction.guild ? interaction.guild.id : 'DM'}`;
 
    if (userCooldowns.has(userId)) {
       const expirationTime = userCooldowns.get(userId) + cooldownAmount;
@@ -137,14 +137,6 @@ export default async (client, errorHandler, interaction) => {
             interaction,
             mConfig.embedColorError,
             'Bot is currently in maintenance mode. Please try again later.'
-         );
-      }
-
-      if (!interaction.guild && !commandObject.dmAllowed) {
-         return sendEmbedReply(
-            interaction,
-            mConfig.embedColorError,
-            'This command can only be used within a server.'
          );
       }
 

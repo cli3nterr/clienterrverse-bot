@@ -65,6 +65,7 @@ export default {
    testMode: false,
    devOnly: true,
    category: 'Devloper',
+   prefix: false,
 
    run: async (client, interaction) => {
       const subcommand = interaction.options.getSubcommand();

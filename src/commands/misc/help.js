@@ -11,7 +11,7 @@ import getLocalCommands from '../../utils/getLocalCommands.js';
 import mConfig from '../../config/messageConfig.js';
 
 const COMMANDS_PER_PAGE = 8;
-const INTERACTION_TIMEOUT = 300000; // 5 minutes
+const INTERACTION_TIMEOUT = 300000;
 
 const categorizeCommands = (commands) => {
    const categorized = commands.reduce((acc, cmd) => {
@@ -48,7 +48,7 @@ export default {
    run: async (client, interaction) => {
       try {
          const localCommands = await getLocalCommands();
-         const embedColor = mConfig.embedColorDefault || '#0099ff';
+         const embedColor = mConfig.embedColorDefault ?? '#0099ff';
          const prefix = '!';
 
          const commandOption = interaction.options.getString('command');
@@ -65,6 +65,11 @@ export default {
                   embedColor,
                   prefix
                );
+            } else {
+               return await interaction.reply({
+                  content: `Command "${commandOption}" not found.`,
+                  ephemeral: true,
+               });
             }
          }
 
@@ -81,6 +86,10 @@ export default {
                   embedColor,
                   prefix
                );
+            } else {
+               return await interaction.reply({
+                  content: `Category "${categoryOption}" not found.`,
+               });
             }
          }
 
@@ -101,24 +110,25 @@ export default {
 };
 
 async function showCommandDetails(interaction, command, embedColor, prefix) {
+   console.log(command);
    const embed = new EmbedBuilder()
       .setTitle(`📖 Command: ${command.name}`)
-      .setDescription(command.description || 'No description available.')
+      .setDescription(command.description ?? 'No description available.')
       .setColor(embedColor)
       .addFields(
          {
             name: '🏷️ Category',
-            value: command.category || 'Uncategorized',
+            value: command.category ?? 'Uncategorized',
             inline: true,
          },
          {
             name: '⏳ Cooldown',
-            value: `${command.cooldown || 0}s`,
+            value: `${command.cooldown ?? 0}s`,
             inline: true,
          },
          {
             name: '🔒 Permissions',
-            value: command.userPermissions?.join(', ') || 'None',
+            value: command.userPermissions?.join(', ') ?? 'None',
             inline: true,
          },
          {
@@ -158,7 +168,6 @@ async function showCommandDetails(interaction, command, embedColor, prefix) {
    const response = await interaction.reply({
       embeds: [embed],
       components: [row],
-      ephemeral: true,
    });
 
    const collector = response.createMessageComponentCollector({
@@ -182,7 +191,7 @@ async function showCommandDetails(interaction, command, embedColor, prefix) {
             .setTitle(`📝 Examples for ${command.name}`)
             .setColor(embedColor)
             .setDescription(
-               command.examples?.join('\n') || 'No examples available.'
+               command.examples?.join('\n') ?? 'No examples available.'
             );
          await i.reply({ embeds: [examplesEmbed], ephemeral: true });
       }
@@ -202,7 +211,15 @@ async function showCategoryCommands(
    prefix
 ) {
    const categorizedCommands = categorizeCommands(localCommands);
-   const categoryCommands = categorizedCommands[category] || [];
+   const categoryCommands = categorizedCommands[category] ?? [];
+
+   if (categoryCommands.length === 0) {
+      return interaction.reply({
+         content: `No commands found in the "${category}" category.`,
+         ephemeral: true,
+      });
+   }
+
    const pages = createCommandPages(
       categoryCommands,
       category,
@@ -232,7 +249,6 @@ async function showCategoryCommands(
    const response = await interaction.reply({
       embeds: [pages[currentPage]],
       components: [row],
-      ephemeral: true,
    });
 
    const collector = response.createMessageComponentCollector({
@@ -300,7 +316,6 @@ async function showCommandOverview(
    const response = await interaction.reply({
       embeds: [overviewEmbed],
       components: [categorySelect],
-      ephemeral: true,
    });
 
    const collector = response.createMessageComponentCollector({
@@ -316,11 +331,10 @@ async function showCommandOverview(
       }
 
       if (i.customId === 'category_select') {
-         const selectedCategory = i.values[0];
          await showCategoryCommands(
             i,
             localCommands,
-            selectedCategory,
+            i.values[0],
             embedColor,
             prefix
          );
@@ -328,50 +342,45 @@ async function showCommandOverview(
    });
 
    collector.on('end', () => {
-      categorySelect.components[0].setDisabled(true);
+      categorySelect.components.forEach((component) =>
+         component.setDisabled(true)
+      );
       interaction.editReply({ components: [categorySelect] });
    });
 }
 
 function createOverviewEmbed(categorizedCommands, embedColor, prefix) {
-   const embed = new EmbedBuilder()
-      .setTitle('📚 Command Overview')
-      .setColor(embedColor)
+   const overviewEmbed = new EmbedBuilder()
+      .setTitle('📜 Command Categories')
       .setDescription(
-         `Here's an overview of all available categories. Select a category from the dropdown below to view the commands.\n\n**Prefix:** \`${prefix}\``
-      );
+         'Use the menu below to select a category or use `/help <command>` for specific command details.'
+      )
+      .setColor(embedColor)
+      .addFields(
+         Object.keys(categorizedCommands).map((category) => ({
+            name: `${getCategoryEmoji(category)} ${category}`,
+            value: `${categorizedCommands[category].length} commands`,
+            inline: true,
+         }))
+      )
+      .setFooter({ text: `Prefix: ${prefix}` });
 
-   Object.keys(categorizedCommands).forEach((category) => {
-      embed.addFields({
-         name: getCategoryEmoji(category) + ' ' + category,
-         value: categorizedCommands[category]
-            .map((cmd) => `\`${cmd.name}\``)
-            .join(', '),
-         inline: true,
-      });
-   });
-
-   return embed;
+   return overviewEmbed;
 }
 
-function createCommandPages(commands, category, embedColor, prefix) {
+function createCommandPages(categoryCommands, category, embedColor, prefix) {
    const pages = [];
-   const totalPages = Math.ceil(commands.length / COMMANDS_PER_PAGE);
 
-   for (let i = 0; i < totalPages; i++) {
-      const pageCommands = commands.slice(
-         i * COMMANDS_PER_PAGE,
-         i * COMMANDS_PER_PAGE + COMMANDS_PER_PAGE
-      );
-
+   for (let i = 0; i < categoryCommands.length; i += COMMANDS_PER_PAGE) {
+      const commandsSlice = categoryCommands.slice(i, i + COMMANDS_PER_PAGE);
       const embed = new EmbedBuilder()
-         .setTitle(`📖 ${category} Commands`)
+         .setTitle(`📜 ${category} Commands`)
          .setColor(embedColor)
-         .setDescription(`Page ${i + 1} of ${totalPages}`)
+         .setDescription('Here are the available commands:')
          .addFields(
-            pageCommands.map((cmd) => ({
-               name: cmd.name,
-               value: cmd.description || 'No description available.',
+            commandsSlice.map((cmd) => ({
+               name: `\`${cmd.prefix ? prefix : '/'}${cmd.data.name}\``,
+               value: cmd.data.description ?? 'No description available.',
                inline: true,
             }))
          );
@@ -384,22 +393,14 @@ function createCommandPages(commands, category, embedColor, prefix) {
 
 function getCategoryEmoji(category) {
    const emojis = {
-      Uncategorized: '❓',
-      'Prefix Commands': '🔧',
-      ticket: '🎟️',
-      Admin: '🛡️',
-      Misc: '🎉',
-      image: '🔧',
-      economy: '💰',
+      General: '🌐',
+      Moderation: '🔨',
+      Fun: '🎉',
+      Utility: '⚙️',
       Music: '🎵',
-      Developer: '👩🏾‍💻',
-      Moderation: '🚨',
-      Fun: '🎮',
-      Utility: '🛠️',
-      Information: 'ℹ️',
-      Configuration: '⚙️',
-
-      // Add more category-specific emojis if desired
+      'Prefix Commands': '🔧',
+      Uncategorized: '❓',
    };
+
    return emojis[category] || '📁';
 }
